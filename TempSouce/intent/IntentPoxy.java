@@ -1,6 +1,7 @@
 package com.cnsunrun.common.intent;
 
 import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
@@ -16,7 +17,9 @@ import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -94,63 +97,42 @@ public class IntentPoxy implements InvocationHandler {
                     intent.putExtra(paramsAnnotation.value(), (Parcelable[]) params);
                 } else if (params instanceof CharSequence[]) {
                     intent.putExtra(paramsAnnotation.value(), (CharSequence[]) params);
-                }else if (params instanceof Intent) {
-                    intent.putExtras( (Intent) params);
+                } else if (params instanceof Intent) {
+                    intent.putExtras((Intent) params);
                 } else if (params instanceof Bundle) {
-                    intent.putExtras( (Bundle) params);
+                    intent.putExtras((Bundle) params);
                 } else if (params instanceof ArrayList) {
                     intent.putCharSequenceArrayListExtra(paramsAnnotation.value(), (ArrayList) params);
-                }else if (params instanceof Serializable) {
+                } else if (params instanceof Serializable) {
                     intent.putExtra(paramsAnnotation.value(), (Serializable) params);
                 } else if (params instanceof Parcelable) {
                     intent.putExtra(paramsAnnotation.value(), (Parcelable) params);
-                }else {
-                    //特殊类型,放置在Session中
-                    NetSession.instance(sourceAct).put(paramsAnnotation.value(),  params);
+                } else {
+                    //特殊类型,使用DataStorage,进行存储
+                    put(paramsAnnotation.value(), params);
                 }
-            }else {
+            } else {
                 //参数不存在key注解时,尝试当做Intent类型以及 Bundle类型处理
-                 if (params instanceof Intent) {
-                    intent.putExtras( (Intent) params);
+                if (params instanceof Intent) {
+                    intent.putExtras((Intent) params);
                 } else if (params instanceof Bundle) {
-                    intent.putExtras( (Bundle) params);
-                }else {
-                     //使用参数类型类名作为key将参数序列化到Session中
-                     NetSession.instance(sourceAct).put(params.getClass().getName(),  params);
-                 }
+                    intent.putExtras((Bundle) params);
+                } else {
+                    //使用参数类型类名作为key将参数序列化到DataStorage中
+                    put(params.getClass().getName(), params);
+                }
             }
         }
         if (resultCodeAnno != null) {
             defaultResultCode = resultCodeAnno.value();
         }
         sourceAct.startActivityForResult(intent, defaultResultCode);
-//        method.getParameterAnnotations()
         return null;
     }
 
-
-//    private boolean putParamsToIntent(Intent intent,String key,Object val){
-//        Method[] declaredMethods = Intent.class.getMethods();
-//        for (Method declaredMethod : declaredMethods) {
-//            Class<?>[] parameterTypes = declaredMethod.getParameterTypes();
-//            if(declaredMethod.getName().startsWith("put")&&parameterTypes!=null && parameterTypes.length==2&&parameterTypes[0]==String.class){
-//                if(parameterTypes[1]==val.getClass()){
-//                    try {
-//                        declaredMethod.invoke(intent,key,val);
-//                        return true;
-//                    } catch (IllegalAccessException e) {
-//                        e.printStackTrace();
-//                    } catch (InvocationTargetException e) {
-//                        e.printStackTrace();
-//                    }
-//                }
-//            }
-//        }
-//        return false;
-//    }
-
     /**
      * 查找参数注解
+     *
      * @param annotations
      * @param clazz
      * @return
@@ -171,7 +153,7 @@ public class IntentPoxy implements InvocationHandler {
      * @param methodName
      * @return
      */
-    private String readActivityRealName(Activity act, String methodName) {
+    private String readActivityRealName(Context act, String methodName) {
 
         try {
             if (activitys.isEmpty()) {
@@ -195,27 +177,44 @@ public class IntentPoxy implements InvocationHandler {
     }
 
     /**
+     * 设置额外的数据存储器,用于存放传递的特殊类型的数据
+     *
+     * @param dataStorage
+     */
+    public static void setDataStorage(DataStorage dataStorage) {
+        DATA_STORAGE = dataStorage;
+    }
+
+    private void put(String key, Object value){
+        if(DATA_STORAGE==null)throw new RuntimeException("没有设置DataStorage,不支持:"+value+"该对象的传递");
+        DATA_STORAGE.put(key,value);
+    }
+
+    static DataStorage DATA_STORAGE;
+    /**
      * 清单文件中配置的Activity缓存
      */
     private Set<String> activitys = new HashSet<>();
-    private static StartIntent startIntent;
-
+    /**
+     * 代理实例缓存,避免重复创建
+     */
+    private static Map<Class, Object> INTENT_PROXYS = new HashMap<>();
     /**
      * 获取代理实例
      *
      * @return
      */
-    public static StartIntent getProxyInstance() {
-        if (startIntent == null) {
-            synchronized (StartIntent.class) {
-                if (startIntent == null) {
-                    startIntent = (StartIntent) Proxy.newProxyInstance(StartIntent.class.getClassLoader(),
-                            new Class[]{StartIntent.class},
-                            new IntentPoxy());
-                }
+    public static <T> T getProxyInstance(Class<? extends T> interfaceClazz) {
+        Object obj = INTENT_PROXYS.get(interfaceClazz);
+        if (obj == null) {
+            synchronized (IntentPoxy.class) {
+                obj = Proxy.newProxyInstance(interfaceClazz.getClassLoader(),
+                        new Class[]{interfaceClazz},
+                        new IntentPoxy());
+                INTENT_PROXYS.put(interfaceClazz, obj);
             }
         }
-        return startIntent;
+        return (T) obj;
     }
 
 }
